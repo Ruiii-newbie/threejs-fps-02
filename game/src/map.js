@@ -37,7 +37,10 @@ const BOXES = [
   [1.2, 2.2, 1.2, 0, 1.1, 16, 'wall'],
   // furnace pillars at A, silo at B (tall landmarks)
   [2, 4.6, 2, -27, 2.3, -11, 'dark'], [2, 4.6, 2, 27, 2.3, -11, 'dark'],
-  [6, 0.6, 6, -22, 0.3, -18, 'surface'], [6, 0.6, 6, 22, 0.3, -18, 'surface'],
+  // site pads: flat visual slabs bots walk over, NOT colliders. They used to be
+  // 0.6-high solid boxes, which covered the whole bot plant radius (d < 3 from the
+  // site centre), so no bot could ever reach plant range at either site.
+  [6, 0.12, 6, -22, 0.06, -18, 'surface'], [6, 0.12, 6, 22, 0.06, -18, 'surface'],
 ];
 
 export const SITES = {
@@ -49,18 +52,29 @@ export const SPAWNS = {
   S: [[-24, -20], [-18, -14], [24, -20], [18, -14], [0, -16]],
 };
 // Waypoint graph: nodes [x,z], edges as pairs. Bots pathfind with BFS over this.
+// Every edge was verified walkable: no segment crosses a solid box (checked with a
+// 0.5-unit inflation, bot radius 0.34). The old graph had 25 of 38 edges crossing
+// walls/crates, so bots walked into walls and never arrived. Lanes: west/east lanes
+// run at x=-18/+18; the x=-16/+16 walls are crossed only in the z=-4..8 gap
+// (nodes 8/9); the mid wall at (0,6) and connector wall at (0,-10) are crossed
+// only around their ends (nodes 19/20/21/22); site pads are walkable (see createMap).
 export const WAYPOINTS = [
-  [0, 24], [-10, 20], [10, 20], [-21, 12], [21, 12], [-10, 8], [10, 8], [0, 4],
-  [-21, -2], [21, -2], [-10, -6], [10, -6], [0, -8], [-22, -14], [22, -14],
-  [-22, -19], [22, -19], [-12, -16], [12, -16], [0, -16], [-26, -22], [26, -22],
-  [-4, -20], [4, -20],
+  [0, 24], [0, 18], [-13, 18], [13, 18], [-18, 18], [18, 18],
+  [-18, 12], [18, 12], [-18, 4], [18, 4], [-9, 4], [9, 4],
+  [-6, 14], [6, 14], [-9, 12], [9, 12], [0, 4],
+  [-18, 0], [18, 0], [-9, 2], [9, 2], [-9, -7], [9, -7],
+  [0, -8], [-12, -8], [12, -8], [-18, -12], [18, -12],
+  [-18, -18], [18, -18], [-21, -18], [21, -18],
 ];
 export const EDGES = [
-  [0, 1], [0, 2], [1, 3], [2, 4], [1, 5], [2, 6], [3, 7], [4, 7], [5, 7], [6, 7],
-  [3, 8], [4, 9], [5, 10], [6, 11], [7, 12], [8, 10], [9, 11], [10, 12], [11, 12],
-  [10, 17], [11, 18], [12, 19], [13, 15], [14, 16], [13, 17], [14, 18],
-  [15, 20], [16, 21], [17, 22], [18, 23], [19, 22], [19, 23], [8, 13], [9, 14],
-  [12, 17], [12, 18], [0, 5], [0, 6],
+  [0, 1], [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7],
+  [6, 8], [7, 9], [8, 10], [9, 11], [10, 14], [11, 15],
+  [12, 14], [13, 15], [1, 12], [1, 13], [12, 13], [14, 10], [15, 11],
+  [10, 16], [11, 16], [16, 19], [16, 20], [19, 21], [20, 22],
+  [21, 23], [22, 23], [23, 24], [23, 25], [19, 24], [20, 25],
+  [6, 17], [7, 18], [17, 8], [18, 9], [17, 26], [18, 27],
+  [8, 26], [9, 27], [26, 28], [27, 29], [28, 30], [29, 31],
+  [14, 12], [15, 13],
 ];
 export const ADJ = WAYPOINTS.map(() => []);
 for (const [a, b] of EDGES) { ADJ[a].push(b); ADJ[b].push(a); }
@@ -96,7 +110,10 @@ export function createMap(scene) {
     if (!geoCache.has(key)) geoCache.set(key, new THREE.BoxGeometry(w, h, d));
     const m = new THREE.Mesh(geoCache.get(key), mats[mat] || mats.wall);
     m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
-    group.add(m); colliders.push(new THREE.Box3().setFromObject(m)); shootables.push(m);
+    group.add(m);
+    // 'surface' pads are flat visuals (see BOXES): bots and the player walk over them.
+    if (mat !== 'surface') colliders.push(new THREE.Box3().setFromObject(m));
+    shootables.push(m);
     return m;
   }
   for (const b of BOXES) box(...b);

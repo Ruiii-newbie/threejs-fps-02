@@ -138,6 +138,7 @@ function siteAt(x, z) {
   return null;
 }
 function shoot() {
+  if (S.phase === 'freeze') return; // buy phase: no firing before the round starts
   const w = weapons.def();
   if (!weapons.takeRound()) { audio.dry(); weapons.reload(); return; }
   camera.getWorldDirection(dir);
@@ -174,6 +175,7 @@ function shoot() {
   }
 }
 function throwGrenade(kind) {
+  if (S.phase === 'freeze') return; // buy phase: no grenades before the round starts
   const p = S.player;
   if (p.grenades[kind] <= 0) return;
   p.grenades[kind]--;

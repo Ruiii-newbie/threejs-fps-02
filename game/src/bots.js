@@ -41,6 +41,8 @@ export function createBots(S, scene, colliders, opts) {
       burstLeft: 0, nextShot: 0, pauseUntil: 0, strafeDir: 1, strafeUntil: 0,
       skill: 0.55 + Math.random() * 0.3, weapon: 'vk47', progress: 0, thinkAt: Math.random() * 0.15,
       carrier: false, holdUntil: 0, home: new THREE.Vector3(),
+      // stuck recovery: last position where the bot was seen making progress
+      stuckX: 0, stuckZ: 0, stuckT: 0,
     };
     torso.userData.bot = bot; head.userData.bot = bot; head.userData.part = 'head'; torso.userData.part = 'body';
     bots.push(bot); return bot;
@@ -81,15 +83,31 @@ export function createBots(S, scene, colliders, opts) {
   }
   function perceive(bot) {
     if (S.time < bot.blindUntil) { bot.target = null; return; }
+    // A dead target is not a target: without this, a bot keeps "engaging" a
+    // corpse (strafing and firing tracers at it) and never falls through to
+    // its other jobs — observed: during a planted round the last living
+    // defender kept shooting a dead planter at site A instead of rotating to
+    // the planted bomb at site B to defuse it.
+    if (bot.target) {
+      const targetAlive = bot.target === 'player' ? S.player.alive : bot.target.alive;
+      if (!targetAlive) bot.target = null;
+    }
     const e = nearestEnemy(bot);
     if (!e) { bot.target = null; return; }
+    // The bomb carrier's job is to plant, not to duel: ignore enemies beyond
+    // self-defence range so the carrier keeps pushing to the site instead of
+    // standing mid-map trading shots until the round ends.
+    if (bot.carrier) {
+      const ep = e === 'player' ? S.player.pos : e.pos;
+      if (bot.pos.distanceTo(ep) > 14) { bot.target = null; return; }
+    }
     const ep = e === 'player' ? S.player.pos : e.pos;
     const ey = e === 'player' ? (S.player.crouching ? 1.0 : 1.55) : EYE;
     if (canSee(bot, ep.x, ep.y + ey, ep.z)) {
       bot.target = e; bot.lastSeen = { x: ep.x, z: ep.z, t: S.time };
     } else if (bot.target === e) bot.target = null;
-    // hearing: recent loud events pull idle bots
-    if (!bot.target && (bot.state === 'hold' || bot.state === 'patrol')) {
+    // hearing: recent loud events pull idle bots (never the carrier off its route)
+    if (!bot.target && !bot.carrier && (bot.state === 'hold' || bot.state === 'patrol')) {
       for (const ev of S.events) {
         if (S.time - ev.t > 1.2) continue;
         const d = Math.hypot(ev.x - bot.pos.x, ev.z - bot.pos.z);
@@ -148,9 +166,27 @@ export function createBots(S, scene, colliders, opts) {
   }
   function stepBot(bot, dt) {
     if (!bot.alive) return;
+    // Freeze time is a buy phase: nobody moves, sees or shoots. Without this,
+    // bots traded potshots across the map before the round started.
+    if (S.phase === 'freeze') { bot.group.position.copy(bot.pos); bot.group.rotation.y = bot.yaw; return; }
     bot.thinkAt -= dt;
     if (bot.thinkAt <= 0) { bot.thinkAt = 0.15; perceive(bot); }
     const blind = S.time < bot.blindUntil;
+    // Stuck recovery: a bot following a path that makes no progress (e.g. pressed
+    // against a wall) abandons that route for a fresh one instead of pushing
+    // forever. Only path-following states count; engaging/holding/planting bots
+    // are not "stuck" for standing still.
+    const followingPath = bot.pathIdx < bot.path.length && bot.state !== 'engage'
+      && bot.state !== 'plant' && bot.state !== 'defuse' && bot.state !== 'hold';
+    if (followingPath) {
+      const moved = Math.hypot(bot.pos.x - bot.stuckX, bot.pos.z - bot.stuckZ);
+      if (moved > 0.4) { bot.stuckX = bot.pos.x; bot.stuckZ = bot.pos.z; bot.stuckT = S.time; }
+      else if (S.time - bot.stuckT > 1.5) {
+        bot.stuckX = bot.pos.x; bot.stuckZ = bot.pos.z; bot.stuckT = S.time;
+        setPath(bot, Math.floor(Math.random() * WAYPOINTS.length));
+        bot.state = 'patrol'; bot.holdUntil = S.time + 2;
+      }
+    } else { bot.stuckX = bot.pos.x; bot.stuckZ = bot.pos.z; bot.stuckT = S.time; }
     // face target
     if (bot.target && !blind) {
       const tp = bot.target === 'player' ? S.player.pos : bot.target.pos;
@@ -223,6 +259,7 @@ export function createBots(S, scene, colliders, opts) {
       bot.group.visible = true; bot.group.position.copy(bot.pos);
       bot.yaw = bot.team === 'V' ? 0 : Math.PI; bot.target = null; bot.lastSeen = null;
       bot.state = 'hold'; bot.progress = 0; bot.blindUntil = 0; bot.burstLeft = 0;
+      bot.stuckX = bot.pos.x; bot.stuckZ = bot.pos.z; bot.stuckT = S.time;
       bot.weapon = bot.team === 'S' && i % 2 === 0 ? 'vk47' : (Math.random() < 0.5 ? 'vk47' : 'mp9');
       bot.carrier = false; bot.site = null; bot.holdUntil = S.time + 1 + Math.random() * 2;
       bot.home.copy(bot.pos);
@@ -233,7 +270,7 @@ export function createBots(S, scene, colliders, opts) {
       } else {
         bot.site = ti < 2 ? 'A' : ti < 4 ? 'B' : null;
         if (bot.site) { const s = SITES[bot.site]; goTo(bot, s.x + (Math.random() * 4 - 2), s.z + (Math.random() * 4 - 2)); bot.state = 'hold'; }
-        else { bot.state = 'patrol'; setPath(bot, 19); }
+        else { bot.state = 'patrol'; setPath(bot, 23); } // node 23 (0,-8): mid-north patrol
       }
     });
     // one V bot is the carrier if the player is not carrying (player always carries at round start)
