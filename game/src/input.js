@@ -1,49 +1,38 @@
-// Keyboard and mouse, and the pointer lock that turns the mouse into look. Plain browser
-// APIs only: the game asks the canvas for pointer lock and reads movementX/Y while it holds it.
+// Keyboard + mouse + pointer lock. Edge-triggered presses are consumed once by main.
 export function createInput(canvas, onLockChange) {
-  const keys = new Set();
-  const state = { keys, locked: false, firing: false, lookX: 0, lookY: 0 };
-
-  function setKey(event, down) {
-    if (down) keys.add(event.code);
-    else keys.delete(event.code);
-    if (event.code === 'Space') event.preventDefault();
-  }
-
-  window.addEventListener('keydown', (event) => setKey(event, true));
-  window.addEventListener('keyup', (event) => setKey(event, false));
-  window.addEventListener('blur', () => keys.clear());
-  window.addEventListener('mousemove', (event) => {
+  const keys = new Set(), pressed = new Set();
+  const state = { keys, locked: false, firing: false, ads: false, lookX: 0, lookY: 0 };
+  window.addEventListener('keydown', (e) => {
+    if (!e.repeat) pressed.add(e.code);
+    keys.add(e.code);
+    if (e.code === 'Space' || e.code === 'Tab') e.preventDefault();
+  });
+  window.addEventListener('keyup', (e) => keys.delete(e.code));
+  window.addEventListener('blur', () => { keys.clear(); state.firing = false; state.ads = false; });
+  window.addEventListener('mousemove', (e) => {
     if (!state.locked) return;
-    state.lookX += event.movementX;
-    state.lookY += event.movementY;
+    state.lookX += e.movementX; state.lookY += e.movementY;
   });
-  window.addEventListener('mousedown', (event) => {
-    if (state.locked && event.button === 0) state.firing = true;
+  window.addEventListener('mousedown', (e) => {
+    if (!state.locked) return;
+    if (e.button === 0) state.firing = true;
+    if (e.button === 2) state.ads = true;
   });
-  window.addEventListener('mouseup', (event) => {
-    if (event.button === 0) state.firing = false;
+  window.addEventListener('mouseup', (e) => {
+    if (e.button === 0) state.firing = false;
+    if (e.button === 2) state.ads = false;
   });
+  window.addEventListener('contextmenu', (e) => e.preventDefault());
   document.addEventListener('pointerlockchange', () => {
     state.locked = document.pointerLockElement === canvas;
-    if (!state.locked) {
-      keys.clear();
-      state.firing = false;
-    }
+    if (!state.locked) { keys.clear(); state.firing = false; state.ads = false; }
     onLockChange(state.locked);
   });
-
   return {
     state,
-    requestLock() {
-      canvas.requestPointerLock();
-    },
-    takeLook() {
-      const x = state.lookX;
-      const y = state.lookY;
-      state.lookX = 0;
-      state.lookY = 0;
-      return { x, y };
-    },
+    requestLock() { canvas.requestPointerLock(); },
+    takeLook() { const x = state.lookX, y = state.lookY; state.lookX = 0; state.lookY = 0; return { x, y }; },
+    consume(code) { if (pressed.has(code)) { pressed.delete(code); return true; } return false; },
+    clearPressed() { pressed.clear(); },
   };
 }
