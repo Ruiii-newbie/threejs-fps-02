@@ -2,10 +2,16 @@
 // plant/defuse/retreat. Perception = FOV + LOS raycast + smoke + hearing (shots and
 // explosions attract). Combat = burst fire, accuracy by range/skill/movement, strafing,
 // cover at low HP. Attackers push a site and plant; defenders hold and rotate.
+//
+// Buy phase: every bot buys the VK-47 rifle + 50 kevlar at round start (see reset),
+// so the squad fights fully geared instead of on a coin-flip loadout while the
+// team's round money piles up unspent. The attack is coordinated: the whole V
+// squad hits one site (S.attackSite), the carrier's job is to plant, and after a
+// plant the attackers converge on the site and hold it for the detonation.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 import { moveCapsule, losBlocked } from './collision.js';
-import { WAYPOINTS, SITES, SPAWNS, nearestNode, findPath } from './map.js';
+import { WAYPOINTS, SITES, SPAWNS, nearestNode, nearestNodeClear, findPath } from './map.js';
 import { WEAPONS } from './weapons.js';
 
 const NAMES_V = ['Rook', 'Iris', 'Dagger', 'Havoc'];
@@ -39,7 +45,9 @@ export function createBots(S, scene, colliders, opts) {
       pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, state: 'hold', site: null,
       node: 0, path: [], pathIdx: 0, target: null, lastSeen: null, blindUntil: 0,
       burstLeft: 0, nextShot: 0, pauseUntil: 0, strafeDir: 1, strafeUntil: 0,
-      skill: 0.55 + Math.random() * 0.3, weapon: 'vk47', progress: 0, thinkAt: Math.random() * 0.15,
+      // Attackers shoot a touch sharper and press harder between bursts: they
+      // must break defenders who hold angles on the site.
+      skill: (team === 'V' ? 0.62 : 0.55) + Math.random() * 0.3, weapon: 'vk47', progress: 0, thinkAt: Math.random() * 0.15,
       carrier: false, holdUntil: 0, home: new THREE.Vector3(),
       // stuck recovery: last position where the bot was seen making progress
       stuckX: 0, stuckZ: 0, stuckT: 0,
@@ -51,7 +59,9 @@ export function createBots(S, scene, colliders, opts) {
   for (let i = 0; i < 5; i++) makeBot(4 + i, 'S', NAMES_S[i]);
 
   function setPath(bot, nodeId) {
-    bot.path = findPath(nearestNode(bot.pos.x, bot.pos.z), nodeId);
+    // Start from the nearest node reachable in a straight line, not the nearest
+    // as the crow flies: the latter can sit across a wall and trap the bot.
+    bot.path = findPath(nearestNodeClear(bot.pos.x, bot.pos.z), nodeId);
     bot.pathIdx = 0;
   }
   function goTo(bot, x, z) { setPath(bot, nearestNode(x, z)); }
@@ -118,7 +128,11 @@ export function createBots(S, scene, colliders, opts) {
   function fireAt(bot, target, dt) {
     if (S.time < bot.pauseUntil) return;
     const w = WEAPONS[bot.weapon] || WEAPONS.vk47;
-    if (bot.burstLeft <= 0) { bot.burstLeft = 3 + Math.floor(Math.random() * 3); bot.pauseUntil = S.time + 0.7 + Math.random() * 0.7; }
+    if (bot.burstLeft <= 0) {
+      bot.burstLeft = 3 + Math.floor(Math.random() * 3);
+      // Attackers press harder between bursts than defenders holding an angle.
+      bot.pauseUntil = S.time + (bot.team === 'V' ? 0.5 + Math.random() * 0.6 : 0.7 + Math.random() * 0.7);
+    }
     if (S.time < bot.nextShot) return;
     bot.nextShot = S.time + 0.11;
     bot.burstLeft--;
@@ -192,7 +206,14 @@ export function createBots(S, scene, colliders, opts) {
       const tp = bot.target === 'player' ? S.player.pos : bot.target.pos;
       bot.yaw = Math.atan2(-(tp.x - bot.pos.x), -(tp.z - bot.pos.z));
     }
-    if (bot.target && !blind) {
+    if (bot.state === 'plant') {
+      // Planting is a commitment: once the carrier is on the site it finishes
+      // the plant instead of abandoning it to duel the first defender it sees
+      // (the old order ran engage first, so a plant stalled whenever an enemy
+      // peeked — the carrier died mid-map with the plant unstarted).
+      bot.progress += dt;
+      if (bot.progress >= 3) { bot.state = 'hold'; bot.progress = 0; opts.onPlanted(bot); }
+    } else if (bot.target && !blind) {
       bot.state = 'engage';
       const tp = bot.target === 'player' ? S.player.pos : bot.target.pos;
       const dist = bot.pos.distanceTo(tp);
@@ -207,9 +228,6 @@ export function createBots(S, scene, colliders, opts) {
       bot.vel.y -= 20 * dt;
       moveCapsule(colliders, bot.pos, bot.vel, dt, 0.34, 1.72);
       fireAt(bot, bot.target, dt);
-    } else if (bot.state === 'plant') {
-      bot.progress += dt;
-      if (bot.progress >= 3) { bot.state = 'hold'; bot.progress = 0; opts.onPlanted(bot); }
     } else if (bot.state === 'defuse') {
       bot.progress += dt;
       if (bot.progress >= 5) { bot.state = 'hold'; bot.progress = 0; opts.onDefused(bot); }
@@ -220,12 +238,29 @@ export function createBots(S, scene, colliders, opts) {
       if (d < 3.5) { bot.state = 'defuse'; bot.progress = 0; }
       else if (bot.pathIdx >= bot.path.length) goTo(bot, site.x, site.z);
       else moveAlongPath(bot, dt, 4.2);
+    } else if (S.bomb.state === 'planted' && bot.team === 'V') {
+      // Bomb planted: attackers converge on the site and hold it for the
+      // detonation instead of patrolling random nodes and letting defenders
+      // walk back in unopposed.
+      const site = SITES[S.bomb.site];
+      const d = Math.hypot(site.x - bot.pos.x, site.z - bot.pos.z);
+      if (d > 8) {
+        const dest = bot.path.length ? WAYPOINTS[bot.path[bot.path.length - 1]] : null;
+        if (!dest || Math.hypot(dest[0] - site.x, dest[1] - site.z) > 4) goTo(bot, site.x, site.z);
+        else moveAlongPath(bot, dt, 4.2);
+      } else { bot.state = 'hold'; bot.holdUntil = S.time + 2; }
     } else if (bot.carrier && S.bomb.state === 'none' && bot.team === 'V' && S.phase === 'live') {
       const site = SITES[bot.site || 'A'];
       const d = Math.hypot(site.x - bot.pos.x, site.z - bot.pos.z);
       if (d < 3) { bot.state = 'plant'; bot.progress = 0; }
-      else if (bot.pathIdx >= bot.path.length) goTo(bot, site.x, site.z);
-      else moveAlongPath(bot, dt, 3.6);
+      else {
+        // Re-route when the current path ends elsewhere (e.g. a stale patrol
+        // route from before the carrier was appointed); otherwise the carrier
+        // walks its old route out before ever heading to the site.
+        const dest = bot.path.length ? WAYPOINTS[bot.path[bot.path.length - 1]] : null;
+        if (!dest || Math.hypot(dest[0] - site.x, dest[1] - site.z) > 4) goTo(bot, site.x, site.z);
+        else moveAlongPath(bot, dt, 4.0);
+      }
     } else if (bot.state === 'push' || bot.state === 'patrol' || bot.state === 'rotate') {
       if (moveAlongPath(bot, dt, 3.4)) {
         if (bot.state === 'push') { bot.state = 'hold'; bot.holdUntil = S.time + 2 + Math.random() * 3; }
@@ -239,9 +274,18 @@ export function createBots(S, scene, colliders, opts) {
     } else { // hold
       bot.vel.set(0, 0, 0);
       if (S.time > bot.holdUntil) {
-        bot.state = 'patrol';
-        const n = Math.floor(Math.random() * WAYPOINTS.length);
-        setPath(bot, n);
+        // Attackers who reached their site hold it: patrolling away leaves
+        // the carrier (or the plant) undefended while defenders rotate in.
+        let stay = false;
+        if (bot.team === 'V' && S.bomb.state === 'none' && bot.site) {
+          const s = SITES[bot.site];
+          if (Math.hypot(s.x - bot.pos.x, s.z - bot.pos.z) < 10) { bot.holdUntil = S.time + 3; stay = true; }
+        }
+        if (!stay) {
+          bot.state = 'patrol';
+          const n = Math.floor(Math.random() * WAYPOINTS.length);
+          setPath(bot, n);
+        }
       }
     }
     bot.group.position.copy(bot.pos);
@@ -251,20 +295,28 @@ export function createBots(S, scene, colliders, opts) {
   }
   function reset(round) {
     const sitePick = Math.random() < 0.5 ? 'A' : 'B';
+    S.attackSite = sitePick; // the site the whole V squad hits this round
     bots.forEach((bot, i) => {
       const ti = bot.team === 'V' ? i : i - 4;
       const sp = bot.team === 'V' ? SPAWNS.V[ti] : SPAWNS.S[ti];
       bot.pos.set(sp[0], 0, sp[1]); bot.vel.set(0, 0, 0);
-      bot.hp = 100; bot.armor = bot.team === 'S' ? 25 : 0; bot.alive = true;
+      bot.hp = 100; bot.alive = true;
+      // Buy phase: every bot spends its round money on the VK-47 rifle and
+      // 50 kevlar. Before this, bots fought on a coin-flip loadout (half of
+      // them on the 19-damage MP9, V with no armor at all while S spawned
+      // with 25) while the team's money piled up past $12,000 unspent.
+      bot.armor = 50; bot.weapon = 'vk47';
       bot.group.visible = true; bot.group.position.copy(bot.pos);
       bot.yaw = bot.team === 'V' ? 0 : Math.PI; bot.target = null; bot.lastSeen = null;
       bot.state = 'hold'; bot.progress = 0; bot.blindUntil = 0; bot.burstLeft = 0;
       bot.stuckX = bot.pos.x; bot.stuckZ = bot.pos.z; bot.stuckT = S.time;
-      bot.weapon = bot.team === 'S' && i % 2 === 0 ? 'vk47' : (Math.random() < 0.5 ? 'vk47' : 'mp9');
       bot.carrier = false; bot.site = null; bot.holdUntil = S.time + 1 + Math.random() * 2;
       bot.home.copy(bot.pos);
       if (bot.team === 'V') {
-        bot.site = i < 2 ? sitePick : (sitePick === 'A' ? 'B' : 'A');
+        // Coordinated push: the whole squad hits the one picked site instead
+        // of splitting 2-and-2 into two separate 2v2s against entrenched
+        // defenders (plus their mid rotator).
+        bot.site = sitePick;
         bot.state = 'push';
         const s = SITES[bot.site]; goTo(bot, s.x, s.z);
       } else {
@@ -282,6 +334,18 @@ export function createBots(S, scene, colliders, opts) {
     aliveCount(team) { return bots.filter((b) => b.alive && b.team === team).length; },
     hitMeshes() { const m = []; for (const b of bots) if (b.alive) { m.push(b.torso, b.head); } return m; },
     setCarrier(bot) { for (const b of bots) b.carrier = false; if (bot) bot.carrier = true; },
-    nearestCarrier() { return bots.find((b) => b.alive && b.team === 'V'); },
+    // Best carrier: the living V bot closest to the attack site, healthier
+    // bots preferred — not just the first one in the list, who may be across
+    // the map at low HP when the player (or the old carrier) goes down.
+    nearestCarrier() {
+      const site = SITES[S.attackSite || 'A'];
+      let best = null, bd = 1e9;
+      for (const b of bots) {
+        if (!b.alive || b.team !== 'V') continue;
+        const d = Math.hypot(site.x - b.pos.x, site.z - b.pos.z) - b.hp / 25;
+        if (d < bd) { bd = d; best = b; }
+      }
+      return best || bots.find((b) => b.alive && b.team === 'V');
+    },
   };
 }

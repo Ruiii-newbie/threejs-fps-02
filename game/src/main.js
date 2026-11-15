@@ -116,8 +116,9 @@ function damagePlayer(dmg, fromPos, attacker) {
     hud.addFeed(`${attacker ? attacker.name : 'SPECTRE'} ▸ you`);
     hud.banner('YOU ARE DOWN', 2500);
     if (document.pointerLockElement) document.exitPointerLock();
-    // bomb carrier falls: nearest living V bot takes the carrier role
-    const c = bots.nearestCarrier(); if (c) { bots.setCarrier(c); c.site = 'A'; }
+    // bomb carrier falls: nearest living V bot takes the carrier role and
+    // keeps pushing the site the squad picked (not a hardcoded site A).
+    const c = bots.nearestCarrier(); if (c) { bots.setCarrier(c); c.site = S.attackSite || 'A'; }
     checkRoundEnd();
   }
 }

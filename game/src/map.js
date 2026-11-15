@@ -87,6 +87,42 @@ export function nearestNode(x, z) {
   }
   return best;
 }
+// Nearest waypoint reachable in a straight line from (x, z): the segment to it
+// must not cross a solid box (0.34 inflation = bot radius). nearestNode() alone
+// can snap to a node across a wall — observed live: the mid patroller spawning
+// at (0,-16) snaps to node 23 (0,-8) straight through the connector wall at
+// z=-10 and pushes into it forever, and stuck-recovery re-paths from the same
+// snapped node, so it never escapes. Falls back to plain nearestNode when no
+// node has a clear segment.
+const SOLID_BOXES = BOXES.filter((b) => b[6] !== 'floor' && b[6] !== 'surface' && b[4] + b[1] / 2 > 0.5);
+function segBlocked2D(x1, z1, x2, z2) {
+  for (const b of SOLID_BOXES) {
+    const w = b[0], d = b[2], cx = b[3], cz = b[5];
+    const mnX = cx - w / 2 - 0.34, mxX = cx + w / 2 + 0.34, mnZ = cz - d / 2 - 0.34, mxZ = cz + d / 2 + 0.34;
+    const dx = x2 - x1, dz = z2 - z1;
+    let tmin = 0, tmax = 1, ok = true;
+    for (const [o, dd, mn, mx] of [[x1, dx, mnX, mxX], [z1, dz, mnZ, mxZ]]) {
+      if (Math.abs(dd) < 1e-9) { if (o < mn || o > mx) { ok = false; break; } }
+      else {
+        let t1 = (mn - o) / dd, t2 = (mx - o) / dd;
+        if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
+        if (t1 > tmin) tmin = t1;
+        if (t2 < tmax) tmax = t2;
+        if (tmin > tmax) { ok = false; break; }
+      }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+export function nearestNodeClear(x, z) {
+  let best = -1, bd = 1e9;
+  for (let i = 0; i < WAYPOINTS.length; i++) {
+    const dx = WAYPOINTS[i][0] - x, dz = WAYPOINTS[i][1] - z, d = dx * dx + dz * dz;
+    if (d < bd && !segBlocked2D(x, z, WAYPOINTS[i][0], WAYPOINTS[i][1])) { bd = d; best = i; }
+  }
+  return best === -1 ? nearestNode(x, z) : best;
+}
 // BFS path (node ids) from node a to node b.
 export function findPath(a, b) {
   if (a === b) return [a];

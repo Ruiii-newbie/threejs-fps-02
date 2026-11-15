@@ -7,6 +7,7 @@ export function createState() {
     round: 1, scoreV: 0, scoreS: 0, roundTime: 100, freezeTime: 12, bombTime: 35,
     money: 800, kills: 0, deaths: 0, lossStreak: 0, roundKills: 0,
     bomb: { state: 'none', site: null, pos: null, plantedAt: 0, planter: null, defuser: null, progress: 0 },
+    attackSite: 'A', // the site V is hitting this round (set by bots.reset)
     player: {
       pos: null, vel: null, yaw: 0, pitch: 0, eye: 1.6, onGround: true, crouching: false,
       height: 1.72, hp: 100, armor: 0, alive: true, ads: false, sprinting: false,
