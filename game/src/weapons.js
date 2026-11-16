@@ -24,22 +24,29 @@ export function createWeapons(S, camera) {
   const grip = new THREE.MeshStandardMaterial({ color: PALETTE.hairline, roughness: 0.7, metalness: 0.25 });
   const bodyM = new THREE.MeshStandardMaterial({ color: PALETTE.ink, roughness: 0.45, metalness: 0.4 });
   const darkM = new THREE.MeshStandardMaterial({ color: PALETTE.dark, roughness: 0.6, metalness: 0.3 });
+  // Viewmodel readability: the old dark barrel + receiver read as an
+  // unidentifiable grey slab against the dark map. Lighter steel barrel and
+  // an amber accent stripe so the gun reads as a gun in screenshots.
+  const steelM = new THREE.MeshStandardMaterial({ color: 0x9aa4ae, roughness: 0.4, metalness: 0.5 });
+  const accentM = new THREE.MeshStandardMaterial({ color: PALETTE.accent, roughness: 0.5, metalness: 0.2 });
   const model = new THREE.Group();
   const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.42), bodyM);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 0.42), grip);
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 0.42), steelM);
   barrel.position.set(0, 0.025, -0.38);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.012, 0.12), accentM);
+  stripe.position.set(0, 0.056, -0.05);
   const stock = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.08, 0.22), grip);
   stock.position.set(0, -0.02, 0.3);
   const sight = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.06, 0.08), darkM);
   sight.position.set(0, 0.08, -0.1);
-  model.add(receiver, barrel, stock, sight);
-  model.position.set(0.24, -0.2, -0.42);
+  model.add(receiver, barrel, stock, sight, stripe);
+  model.position.set(0.22, -0.17, -0.42);
   camera.add(model);
-  const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.16),
+  const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.11),
     new THREE.MeshBasicMaterial({ color: PALETTE.accent, transparent: true, opacity: 0.75, depthWrite: false, side: THREE.DoubleSide }));
-  flash.position.set(0.24, -0.18, -0.95); flash.visible = false; camera.add(flash);
+  flash.position.set(0.22, -0.15, -0.95); flash.visible = false; camera.add(flash);
   const flashLight = new THREE.PointLight(PALETTE.accent, 0, 6);
-  flashLight.position.set(0.24, -0.16, -0.6); camera.add(flashLight);
+  flashLight.position.set(0.22, -0.14, -0.6); camera.add(flashLight);
 
   const ammo = {}; // per-weapon {mag, reserve}
   for (const id of Object.keys(WEAPONS)) ammo[id] = { mag: WEAPONS[id].mag, reserve: WEAPONS[id].reserve };
@@ -52,11 +59,11 @@ export function createWeapons(S, camera) {
     st.kick += (0 - st.kick) * Math.min(1, dt * 14);
     st.switching = Math.max(0, st.switching - dt);
     const ads = S.player.ads;
-    model.position.x += ((ads ? 0 : 0.24) - model.position.x) * Math.min(1, dt * 12);
-    model.position.y += ((ads ? -0.135 : -0.2) - model.position.y) * Math.min(1, dt * 12);
+    model.position.x += ((ads ? 0 : 0.22) - model.position.x) * Math.min(1, dt * 12);
+    model.position.y += ((ads ? -0.135 : -0.17) - model.position.y) * Math.min(1, dt * 12);
     model.position.z = -0.42 + st.kick + st.switching * 0.3;
     model.rotation.x = st.kick * 2.2 + (st.reloadLeft > 0 ? -0.5 * Math.min(1, (cur().reload - st.reloadLeft)) : 0);
-    flash.visible = st.flash > 0; flash.rotation.z = st.flash * 30;
+    flash.visible = st.flash > 0; flash.rotation.z = st.flash * 12;
     flashLight.intensity = st.flash > 0 ? 16 : 0;
     if (st.reloadLeft > 0) {
       st.reloadLeft = Math.max(0, st.reloadLeft - dt);

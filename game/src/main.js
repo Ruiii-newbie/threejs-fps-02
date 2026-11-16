@@ -335,27 +335,39 @@ function runShot(name) {
   hud.hideOverlay();
   document.getElementById('banner').hidden = true; // staged shots: no transient banner
   if (name === 'start') {
-    player.reset(0, 24); aimAt(0, 1.5, -10); settle(10);
-    hud.showOverlay('start');
+    // No menu overlay: the first dossier image must show the live game, not
+    // a menu. Stage a sightline down the east corridor: the B site ring
+    // glows at the far end, a teammate holds the left side, an enemy holds
+    // the site approach on the right.
+    player.reset(21, 12); aimAt(21, 1.2, -18); settle(10);
+    const v1 = bots.bots.find((b) => b.team === 'V');
+    v1.pos.set(17, 0, 4); v1.yaw = Math.PI; v1.group.position.copy(v1.pos);
+    const s1 = bots.bots.find((b) => b.team === 'S');
+    s1.pos.set(24, 0, -8); s1.yaw = Math.PI * 0.7; s1.group.position.copy(s1.pos);
+    hud.banner('STRIKEPOINT — FOUNDRY · 5v5 BOMB PLANT / DEFUSE', 30000); // long: SwiftShader paints are slow, a 4s banner can expire before the frozen frame is captured
   } else if (name === 'buy') {
     player.reset(0, 24); aimAt(0, 1.5, -10); settle(10);
     S.money = 4700; hud.showBuy(true, S.money);
   } else if (name === 'combat') {
     rounds.beginLive(); S.phase = 'live'; S.frozen = false;
-    player.reset(21, 12); aimAt(21, 1.2, 0); settle(6);
-    // stage two defenders in the long east corridor, one hit already
+    player.reset(21, 12); aimAt(21, 1.2, 4); settle(6);
+    // stage two defenders in the open east corridor, one hit already.
+    // d1 stands in the open: the crate at z=6 used to hide it from the
+    // camera at z=12, so the old frame showed an empty grey room.
     const d1 = bots.bots.find((b) => b.team === 'S');
     const d2 = bots.bots.filter((b) => b.team === 'S')[1];
-    d1.pos.set(21, 0, 0); d1.yaw = Math.PI; d1.group.position.copy(d1.pos);
+    d1.pos.set(21, 0, 4); d1.yaw = Math.PI; d1.group.position.copy(d1.pos);
     d2.pos.set(25, 0, -3); d2.yaw = Math.PI * 0.8; d2.group.position.copy(d2.pos);
     d1.hp = 45; // visibly damaged
     const ally = bots.bots.find((b) => b.team === 'V');
-    ally.pos.set(17, 0, 14); ally.group.position.copy(ally.pos);
+    ally.pos.set(17, 0, 6); ally.group.position.copy(ally.pos);
     S.player.owned.vk47 = true; weapons.switchTo('vk47');
-    aimAt(21, 1.2, 0);
-    // fire one tracer shot at d1 for the muzzle/tracer visual
-    settle(4); shoot(); settle(6);
-    hud.addFeed('you ▸ Warden'); hud.hitMarker(false, 4000);
+    aimAt(21, 1.2, 4);
+    // fire one tracer shot at d1 for the muzzle/tracer visual; freeze 2
+    // steps later so the tracer (0.07s) and muzzle flash (0.06s) are still
+    // in the frame — the old settle(6) let both decay before the freeze.
+    settle(2); shoot(); settle(2);
+    hud.hitMarker(false, 4000);
   } else if (name === 'plant') {
     rounds.beginLive(); S.phase = 'live'; S.frozen = false;
     player.reset(-18, -11); aimAt(-22, 1.2, -18); settle(6);

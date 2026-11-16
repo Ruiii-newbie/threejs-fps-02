@@ -156,14 +156,16 @@ export function createMap(scene) {
   // site pads: glowing teal rings (flat boxes, no collision)
   for (const s of Object.values(SITES)) {
     const ring = new THREE.Mesh(new THREE.RingGeometry(s.r - 0.35, s.r, 40),
-      new THREE.MeshBasicMaterial({ color: PALETTE.teal, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+      new THREE.MeshBasicMaterial({ color: PALETTE.teal, transparent: true, opacity: 0.75, side: THREE.DoubleSide }));
     ring.rotation.x = -Math.PI / 2; ring.position.set(s.x, 0.65, s.z); group.add(ring);
     const label = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.85),
       new THREE.MeshBasicMaterial({ color: PALETTE.teal, transparent: true, opacity: 0.22, side: THREE.DoubleSide }));
     label.rotation.x = -Math.PI / 2; label.position.set(s.x, 0.62, s.z); group.add(label);
   }
   // amber strip lights along mid + site beacons
-  const hemi = new THREE.HemisphereLight(PALETTE.surface, PALETTE.canvas, 1.15); scene.add(hemi);
+  // Round 4: hemi 1.15 -> 1.35 and fog pushed out (30/85 -> 34/95) so the
+  // mid/far field stops washing grey in screenshots; site rings brighter.
+  const hemi = new THREE.HemisphereLight(PALETTE.surface, PALETTE.canvas, 1.35); scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff2dd, 2.0);
   sun.position.set(14, 22, 10); sun.target.position.set(0, 0, -4); sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -173,6 +175,6 @@ export function createMap(scene) {
   for (const [x, z, c] of [[-22, -18, 0x2fb8a6], [22, -18, 0x2fb8a6], [0, 4, 0xf0a830], [0, -16, 0xf0a830]]) {
     const p = new THREE.PointLight(c, 14, 16); p.position.set(x, 4.2, z); scene.add(p);
   }
-  scene.fog = new THREE.Fog(PALETTE.canvas, 30, 85);
+  scene.fog = new THREE.Fog(PALETTE.canvas, 34, 95);
   return { colliders, shootables, group };
 }
